@@ -1,6 +1,6 @@
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, Timer, NextTimeStep # <-- ИМПОРТИРУЕМ NextTimeStep
+from cocotb.triggers import RisingEdge, Timer, NextTimeStep
 from typing import List, Tuple
 
 # Для раннера
@@ -17,22 +17,19 @@ CLK_PERIOD = 10
 
 async def reset_dut(dut):
     """Сброс DUT (Device Under Test) и ожидание стабильности."""
+    # Убедимся, что все порты доступны через синтаксис ['in']
     dut["in"].value = 0
     dut.rst.value = 1
     
     clk_period = CLK_PERIOD
-    # Удерживаем сброс
     await Timer(clk_period, units="ns")
     await RisingEdge(dut.clk)
     
     dut.rst.value = 0
-    # Ждем один такт для дезактивации сброса
     await RisingEdge(dut.clk)
     
-    # Проверяем, что выход сброшен
     assert dut.detector_out.value == 0, "Reset failed: detector_out should be 0"
-    
-    dut._log.info(f"DUT initialized and rst deasserted. State: {int(dut.current_state.value)}.")
+    dut._log.info(f"DUT initialized and rst deasserted. State: S0.")
 
 async def execute_sequence(dut, sequence: str, expected_outputs: str):
     """
@@ -42,7 +39,6 @@ async def execute_sequence(dut, sequence: str, expected_outputs: str):
     assert len(sequence) == len(expected_outputs), "Sequence and expected output lengths must match."
     
     for i, (input_bit, expected_out) in enumerate(zip(sequence, expected_outputs)):
-        # Парсинг значений
         input_val = int(input_bit)
         expected_val = int(expected_out)
         
@@ -55,9 +51,8 @@ async def execute_sequence(dut, sequence: str, expected_outputs: str):
         # 2. Ждем положительный фронт CLK: current_state обновляется
         await RisingEdge(dut.clk)
         
-        # 3. ДОПОЛНИТЕЛЬНЫЙ ЦИКЛ ДЕЛЬТЫ (NextTimeStep): 
-        # Ждем, пока комбинационная логика (detector_out) обновится.
-        await NextTimeStep() # <--- ИСПРАВЛЕНИЕ: Используем NextTimeStep вместо Timer(0)
+        # 3. ЦИКЛ ДЕЛЬТЫ: Ждем, пока комбинационная логика обновит detector_out
+        await NextTimeStep() 
         
         # 4. Чтение и проверка выхода
         current_out = int(dut.detector_out.value)
@@ -75,35 +70,45 @@ async def execute_sequence(dut, sequence: str, expected_outputs: str):
 # ==============================================================================
 
 @cocotb.test()
-async def test_sequence_detector_1011(dut):
-    """Проверка основных сценариев для детектора последовательности 1011."""
+async def test_sequence_detector_1101101(dut):
+    """Проверка основных сценариев для детектора последовательности 1101101."""
     
     # Запускаем тактовый сигнал
     cocotb.start_soon(Clock(dut.clk, CLK_PERIOD, units="ns").start())
     
-    dut._log.info("--- Начинаем проверку FSM 1011 ---")
+    dut._log.info("--- Начинаем проверку FSM 1101101 ---")
 
-    # --- Сценарий 1: Успешное обнаружение 1011 ---
-    seq_1011 = "1011"
-    exp_1011 = "0001"
+    # --- Сценарий 1: Успешное обнаружение 1101101 ---
+    # FSM имеет 7 состояний, 7 входных битов.
+    # Sequence: 1   1   0   1   1   0   1
+    # State:    S1  S2  S3  S4  S5  S6  S7 (Detection)
+    # Output:   0   0   0   0   0   0   1 
+    seq_full = "1101101"
+    exp_full = "0000001"
     
-    dut._log.info(f"Тест последовательности: {seq_1011}")
+    dut._log.info(f"Тест 1: Полная последовательность: {seq_full}")
     await reset_dut(dut)
-    await execute_sequence(dut, seq_1011, exp_1011)
+    await execute_sequence(dut, seq_full, exp_full)
 
-    # --- Сценарий 2: Перекрывающиеся последовательности (10111) ---
-    seq_overlap = "10111"
-    exp_overlap = "00010" 
+    # --- Сценарий 2: Перекрывающиеся последовательности (1101101 + 10) ---
+    # Текущее состояние после S7(1) -> S2 (т.к. 1101101 + 1 -> S2(11))
+    # Sequence: 1   1   0   1   1   0   1   1   0
+    # Output:   0   0   0   0   0   0   1   0   0
+    seq_overlap = "110110110"
+    exp_overlap = "000000100" 
     
-    dut._log.info(f"Тест перекрывающейся последовательности: {seq_overlap}")
+    dut._log.info(f"Тест 2: Перекрытие (110110110)")
     await reset_dut(dut)
     await execute_sequence(dut, seq_overlap, exp_overlap)
 
-    # --- Сценарий 3: Ложный старт (111011) ---
-    seq_false = "111011"
-    exp_false = "000001"
+    # --- Сценарий 3: Ложный старт (10 -> Сброс) ---
+    # Sequence: 1   0   1   1   0   1
+    # State:    S1  S0  S1  S2  S3  S4
+    # Output:   0   0   0   0   0   0
+    seq_false = "101101"
+    exp_false = "000000"
     
-    dut._log.info(f"Тест ложного старта: {seq_false}")
+    dut._log.info(f"Тест 3: Ложный старт (10...)")
     await reset_dut(dut)
     await execute_sequence(dut, seq_false, exp_false)
 
@@ -115,7 +120,6 @@ async def test_sequence_detector_1011(dut):
 def test_detector_runner():
     """Pytest wrapper для запуска тестов детектора последовательности."""
     
-    # Импортируем run из cocotb_test.simulator
     try:
         from cocotb_test.simulator import run
     except ImportError:
@@ -123,7 +127,6 @@ def test_detector_runner():
     
     sim = os.getenv("SIM", "icarus")
     
-    # Определяем путь к корню проекта (на два уровня выше этого файла)
     proj_path = Path(__file__).resolve().parent.parent
     
     # ПУТЬ К ВАШЕМУ MODULE.sv
