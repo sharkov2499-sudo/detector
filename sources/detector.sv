@@ -1,6 +1,9 @@
+`timescale 1ns / 1ps
+
 module detector(
 	input clk, // clock signal
 	input rst, // reset input (active high)
+	input en,  // <--- ДОБАВЛЕН НОВЫЙ ВХОД ENABLE
 	input in, // binary input
 	output reg detector_out // output of the sequence detector (Moore FSM)
 );
@@ -18,13 +21,19 @@ module detector(
 
 // --- 1. Регистр состояния (Sequential Logic) ---
 	always @(posedge clk, posedge rst) begin
-		if(rst == 1)
+		if(rst == 1) begin
 			current_state <= S0; // Асинхронный сброс в S0
-		else
-			current_state <= next_state;
+		end else if (en == 1) begin // <--- ДОБАВЛЕНО: Обновление только при EN=1
+			current_state <= next_state; 
+		end else begin
+            // Если en=0, состояние сохраняется
+			current_state <= current_state; // или current_state <= current_state;
+		end
 	end
 
 // --- 2. Логика следующего состояния (Combinational Logic) ---
+    // Эта логика остается неизменной, так как она вычисляет NEXT_STATE
+    // вне зависимости от EN. Управление обновлением происходит в блоке 1.
 	always @(current_state, in) begin
 		next_state = S0; // Значение по умолчанию, если не определено
 		
@@ -39,27 +48,27 @@ module detector(
 			end
 			S2: begin // 11. Ожидаем 0
 				if(in == 0) next_state = S3;
-				else next_state = S2; // (111 -> 11)
+				else next_state = S2;
 			end
 			S3: begin // 110. Ожидаем 1
 				if(in == 1) next_state = S4;
-				else next_state = S0; // (1100 -> Сброс)
+				else next_state = S0;
 			end
 			S4: begin // 1101. Ожидаем 1
 				if(in == 1) next_state = S5;
-				else next_state = S0; // (11010 -> Сброс)
+				else next_state = S0;
 			end
 			S5: begin // 11011. Ожидаем 0
 				if(in == 0) next_state = S6;
-				else next_state = S2; // (110111 -> Перекрытие, начинаем с 11)
+				else next_state = S2;
 			end
 			S6: begin // 110110. Ожидаем 1
-				if(in == 1) next_state = S7; // Успешное обнаружение!
-				else next_state = S3; // (1101100 -> Перекрытие, начинаем с 110)
+				if(in == 1) next_state = S7;
+				else next_state = S3;
 			end
-			S7: begin // 1101101 (Обнаружено). Определяем следующий старт.
-				if(in == 1) next_state = S2; // (11011011 -> Перекрытие, начинаем с 11)
-				else next_state = S3; // (11011010 -> Перекрытие, начинаем с 110)
+			S7: begin // 1101101 (Обнаружено).
+				if(in == 1) next_state = S2;
+				else next_state = S3;
 			end
 			default: next_state = S0;
 		endcase
@@ -68,7 +77,7 @@ module detector(
 // --- 3. Логика выхода (Output Logic - Moore) ---
 	always @(current_state) begin
 		case(current_state)
-			S7: detector_out = 1; // Только в финальном состоянии
+			S7: detector_out = 1;
 			default: detector_out = 0;
 		endcase
 	end
