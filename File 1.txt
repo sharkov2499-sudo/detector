@@ -1,0 +1,5 @@
+There are 5 test cases in the testbench:
+1. Core functionality - testing correct detection of the full sequence (1101101) and activation of the output only at the end;
+2. Overlapping - testing the FSM's ability to be overlapping FSM: using the trailing bits of the first sequence (1101101) as the start of the next (transitioning to S2 or S3, rather than S0). In golden module it is done by proper state transition logic;
+3-4. Reset - testing the correct reset to the initial state S0 upon receiving an incorrect bit, both in the early and later stages of the search. In golden module it is done by setting the next_state register value as S0, if the next data bit doesn't fit the sequence and there is no overlapping sequence part with current sequence;
+5. EN control - verification of the enable signal, which must block the FSM state change when en=0, and resume when en = 1. In golden module it is done by changing the current_state register only when en = 1;
