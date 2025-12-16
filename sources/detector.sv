@@ -29,7 +29,7 @@ module detector(
 	end
 
 	always @(current_state, in) begin
-		next_state = S0;
+
 		
 		case(current_state)
 			S0: begin
@@ -44,7 +44,7 @@ module detector(
 				if(in == 0) next_state = S3;
 				else next_state = S2;
 			end
-			S3: begin // 110. Ожидаем 1
+			S3: begin
 				if(in == 1) next_state = S4;
 				else next_state = S0;
 			end
