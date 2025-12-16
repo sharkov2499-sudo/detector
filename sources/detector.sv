@@ -29,7 +29,7 @@ module detector(
 	end
 
 	always @(current_state, in) begin
-
+		next_state = S0;
 		
 		case(current_state)
 			S0: begin
