@@ -29,7 +29,7 @@ module detector(
 	end
 
 	always @(current_state, in) begin
-		next_state = S0;
+	//	next_state = S0;
 		
 		case(current_state)
 			S0: begin
@@ -58,20 +58,21 @@ module detector(
 			end
 			S6: begin
 				if(in == 1) next_state = S7;
-				else next_state = S3;
+				else next_state = S0;
 			end
 			S7: begin
-				if(in == 1) next_state = S2;
-				else next_state = S3;
+				if(in == 1) next_state = S5;
+				else next_state = S0;
 			end
 			default: next_state = S0;
 		endcase
 	end
 
-	always @(current_state) begin
-		case(current_state)
-			S7: detector_out = 1;
-			default: detector_out = 0;
-		endcase
-	end
+	always @(posedge clk) begin
+    if (rst)
+        detector_out <= 1'b0;
+    else if (en)
+        detector_out <= (next_state == S7);
+    else detector_out <= 1'b0;
+end
 endmodule
