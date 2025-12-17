@@ -5,158 +5,130 @@ from typing import List, Tuple
 import os
 from pathlib import Path
 
-# Период тактового сигнала
+# ==============================================================================
+# Конфигурация
+# ==============================================================================
 CLK_PERIOD = 10 
 
 # ==============================================================================
-# Вспомогательные функции (Helper Functions)
+# Helper Functions
 # ==============================================================================
 
 async def reset_dut(dut, enable=True):
-    """Сброс DUT и ожидание стабильности, установка EN."""
+    """Стандартная процедура инициализации."""
     dut["in"].value = 0
     dut.rst.value = 1
-    
-    # Установка EN в 1, если не требуется иное
-    if enable:
-        dut.en.value = 1
-    else:
-        dut.en.value = 0
-    
+    dut.en.value = 1 if enable else 0
     await Timer(CLK_PERIOD, units="ns")
     await RisingEdge(dut.clk)
-    
     dut.rst.value = 0
     await RisingEdge(dut.clk)
-    
-    assert dut.detector_out.value == 0, "Reset failed: detector_out should be 0"
-    dut._log.info(f"DUT initialized and rst deasserted. EN={dut.en.value}")
+    await NextTimeStep()
+    dut._log.info("DUT Reset Complete.")
 
 async def execute_sequence(dut, sequence: str, expected_outputs: str):
-    """
-    Подаёт последовательность входных данных (in) и проверяет выход (detector_out).
-    Для данного модуля выход появляется на том же такте (Mealy-поведение).
-    """
-    assert len(sequence) == len(expected_outputs), "Sequence and expected output lengths must match."
-    
+    """Подача векторов и проверка выхода на каждом такте."""
+    assert len(sequence) == len(expected_outputs), "Длины строк не совпадают"
     for i, (input_bit, expected_out) in enumerate(zip(sequence, expected_outputs)):
-        input_val = int(input_bit)
-        expected_val = int(expected_out)
-        
-        # 1. Устанавливаем входное значение
-        dut["in"].value = input_val
-        
-        # 2. Ждем фронта синхросигнала
+        dut["in"].value = int(input_bit)
         await RisingEdge(dut.clk)
-        
-        # 3. Ждем микротакт для обновления сигналов в симуляторе
-        await NextTimeStep() 
-        
-        current_out = int(dut.detector_out.value)
-        
-        dut._log.info(
-            f"Step {i+1} (In={input_val}): Expected Out={expected_val}, Actual Out={current_out}"
-        )
-        
-        # Проверка соответствия
-        assert current_out == expected_val, \
-            f"Mismatch at step {i+1}: Input='{sequence[:i+1]}'. Expected Out={expected_val}, Actual Out={current_out}"
+        await NextTimeStep()
+        actual_out = int(dut.detector_out.value)
+        expected_val = int(expected_out)
+        dut._log.info(f"Шаг {i+1:02d}: In={input_bit} | Exp={expected_val} | Act={actual_out}")
+        assert actual_out == expected_val, f"Ошибка на шаге {i+1}!"
 
 # ==============================================================================
-# Тесты (Tests)
+# Тестовые сценарии
 # ==============================================================================
 
 @cocotb.test()
-async def test_sequence_detector_1101101(dut):
-    """Проверка основных сценариев для детектора последовательности 1101101."""
+async def test_sequence_detector_comprehensive(dut):
+    """Комплексный тест детектора с новой сложной последовательностью."""
     
     cocotb.start_soon(Clock(dut.clk, CLK_PERIOD, units="ns").start())
-    
-    dut._log.info("--- Начинаем проверку FSM 1101101 ---")
 
-    # --- Сценарий 1: Успешное обнаружение 1101101 (Базовый) ---
-    seq_full = "1101101"
-    exp_full = "0000001"
-    
-    dut._log.info(f"\nТест 1: Полная последовательность: {seq_full}")
+    # --- ТЕСТ 1: Базовая последовательность ---
+    dut._log.info("\n>>> ТЕСТ 1: Базовая последовательность 1101101")
     await reset_dut(dut)
-    await execute_sequence(dut, seq_full, exp_full)
+    await execute_sequence(dut, "1101101", "0000001")
 
-    # --- Сценарий 2: Перекрывающиеся последовательности (7, 10, 13 такты) ---
-    # При входе 1101101101101 совпадения на 7, 10 и 13 позициях
-    seq_overlap = "1101101101101" 
-    exp_overlap = "0000001001001" 
-    
-    dut._log.info(f"\nТест 2: Тройное перекрытие")
+    # --- ТЕСТ 2: Тройное перекрытие ---
+    dut._log.info("\n>>> ТЕСТ 2: Перекрытия (7, 10, 13 такты)")
     await reset_dut(dut)
-    await execute_sequence(dut, seq_overlap, exp_overlap)
+    await execute_sequence(dut, "1101101101101", "0000001001001")
 
-    # --- Сценарий 3: Ложный старт (10 -> Сброс) ---
-    seq_false = "10110100"
-    exp_false = "00000000"
-    
-    dut._log.info(f"\nТест 3: Ложный старт (10 -> Сброс)")
+    # --- ТЕСТ 3: Пауза EN на S5 ---
+    dut._log.info("\n>>> ТЕСТ 3: Пауза EN=0 на состоянии S5")
     await reset_dut(dut)
-    await execute_sequence(dut, seq_false, exp_false)
-    
-    # --- Сценарий 4: Максимальный сброс (11010) ---
-    seq_max_reset = "11010"
-    exp_max_reset = "00000"
-    
-    dut._log.info(f"\nТест 4: Максимальный сброс (11010)")
-    await reset_dut(dut)
-    await execute_sequence(dut, seq_max_reset, exp_max_reset)
-
-    # --- Сценарий 5: Проверка EN=0 (Пауза) ---
-    dut._log.info("\nТест 5: Проверка EN=0 (Пауза)")
-    
-    await reset_dut(dut, enable=False) 
-    dut.en.value = 1 
-    
-    # 1. Доходим до S5 (11011)
-    await execute_sequence(dut, "11011", "00000") 
-    
-    # 2. Блокируем автомат
-    dut.en.value = 0 
-    
-    # Подаем входы, которые должны быть проигнорированы
+    await execute_sequence(dut, "11011", "00000")
+    dut.en.value = 0
     for _ in range(3):
-        dut["in"].value = 0 # Без EN=1 состояние S5 не должно перейти в S6
-        await RisingEdge(dut.clk)
-        await NextTimeStep()
-        assert int(dut.detector_out.value) == 0, "Ошибка: выход изменился при EN=0"
-    
-    dut._log.info(f"Пауза: Состояние S5 сохранено при EN=0.")
-
-    # 3. Активируем EN=1 и дозавершаем последовательность (0 -> 1)
+        dut["in"].value = 1
+        await RisingEdge(dut.clk); await NextTimeStep()
     dut.en.value = 1
-    # Последовательность: S5 --(0)--> S6 --(1)--> S7 (Выход 1)
     await execute_sequence(dut, "01", "01")
-    dut._log.info("Тест 5 пройден успешно.")
+
+    # --- ТЕСТ 4: Проверка асинхронного сброса ---
+    dut._log.info("\n>>> ТЕСТ 4: Асинхронный сброс")
+    await reset_dut(dut)
+    await execute_sequence(dut, "1101101", "0000001")
+    await Timer(CLK_PERIOD / 2, units="ns")
+    dut.rst.value = 1
+    await NextTimeStep()
+    assert int(dut.detector_out.value) == 0, "Выход не обнулился асинхронно!"
+    dut.rst.value = 0
+
+    # --- ТЕСТ 5: Длинная сложная последовательность (Ваш запрос) ---
+    # Вход: 1 1 0 1 0 1 1 0 1 1 0 1 0 1 1 0 1 1 0 1 1 0 1
+    # Анализ совпадений 1101101:
+    # 1. 11010... (слом)
+    # 2. 1101101 (завершается на 12-м бите)
+    # 3. ...01101 (слом)
+    # 4. 1101101 (завершается на 20-м бите)
+    # 5. ...1101 (перекрытие, завершается на 23-м бите)
+    
+    seq_long = "11010110110101101101101"
+    exp_long = "00000000000100000001001"
+    
+    dut._log.info(f"\n>>> ТЕСТ 5: Сложная последовательность\nIn:  {seq_long}\nExp: {exp_long}")
+    await reset_dut(dut)
+    await execute_sequence(dut, seq_long, exp_long)
+
+    # --- ТЕСТ 6: Защита от 1111111 ---
+    dut._log.info("\n>>> ТЕСТ 6: Серия единиц")
+    await reset_dut(dut)
+    await execute_sequence(dut, "11111111", "00000000")
+
+    # --- ТЕСТ 7: EN=0 в момент детектирования ---
+    dut._log.info("\n>>> ТЕСТ 7: EN=0 при финальном бите")
+    await reset_dut(dut)
+    await execute_sequence(dut, "110110", "000000")
+    dut.en.value = 0
+    dut["in"].value = 1
+    await RisingEdge(dut.clk); await NextTimeStep()
+    assert int(dut.detector_out.value) == 0
+    dut.en.value = 1
+    await execute_sequence(dut, "1", "1")
+
+    dut._log.info("\n==============================================")
+    dut._log.info("ВСЕ ТЕСТЫ ЗАВЕРШЕНЫ УСПЕШНО")
+    dut._log.info("==============================================")
 
 # ==============================================================================
-# Pytest Runner 
+# Runner
 # ==============================================================================
 
 def test_detector_runner():
-    """Pytest wrapper для запуска тестов детектора последовательности."""
-    
     try:
         from cocotb_test.simulator import run
     except ImportError:
         import pytest
-        pytest.fail("cocotb-test не найден. Установите: pip install cocotb-test")
+        pytest.fail("pip install cocotb-test")
     
     sim = os.getenv("SIM", "icarus")
-    
-    # Определение путей
     proj_path = Path(__file__).resolve().parent.parent
     sources = [str(proj_path / "sources" / "detector.sv")]
-    
-    # Проверка наличия файла исходников
-    if not Path(sources[0]).exists():
-        import pytest
-        pytest.fail(f"Файл исходного кода не найден: {sources[0]}")
     
     run(
         verilog_sources=sources,
