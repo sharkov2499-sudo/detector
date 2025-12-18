@@ -5,4 +5,4 @@ and etc.
 
 This module should be part of a bigger system, so it's basically a trigger mechanism, transitioning the entire system from one state to another.
 
-In this particular case, to detect 7-bit consequence this module uses 8 states (S0..S7). S0 - "zero state", S7 - "sequence detected" state. At the state S0 detector waits of sequence and transit to a state S1, then if the input bit is equal to second bit of targeted sequency, detector transit to the state S2, if not - rest to S0. And it is the same for every state. If detector transited to state S7, that means that sequency detected, and output signal is high.
+In this particular case, to detect 7-bit consequence this module uses 8 states (S0..S7). S0 - "zero state", S7 - "sequence detected" state. At the state S0 detector waits of the start of the sequence and transit to a state S1, then if the input bit is equal to second bit of targeted sequency, detector transit to the state S2, if not - reset to S0. Every state has its own transition pattern. If detector transited to the state S7, that means that the sequence is detected, and output signal is high.
